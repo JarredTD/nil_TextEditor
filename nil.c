@@ -7,8 +7,19 @@
 #include <ctype.h>
 /* ---------------------------------*/
 
+/* Constants */
+
+#define CTRL_KEY(k) (k &(0x1f))
+
+/* ---------------------------------*/
+
 /* Data */
-struct termios orig_termios;
+
+struct editorConfig {
+    struct termios orig_termios;
+};
+
+struct editorConfig E;
 
 /* ---------------------------------*/
 
@@ -16,23 +27,25 @@ struct termios orig_termios;
 
 /* Prints error and terminates */
 void die(const char *str){
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
     perror(str);
     exit(1);
 }
 
 /* Upon exiting, reverses the termios struct back to it's original. */
 void disableRawMode() {
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios);
     die("tcsetattr");
 } 
 
 /* Sets a bunch of flags off to enable raw mode */
 void enableRawMode() {
     
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) die("tcgetattr"); 
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr"); 
     atexit(disableRawMode);
 
-    struct termios raw = orig_termios;
+    struct termios raw = E.orig_termios;
     raw.c_iflag &= ~(ICRNL | IXON | BRKINT | INPCK | ISTRIP);
     raw.c_oflag &= ~(OPOST);
     raw.c_cflag &= ~(CS8);
@@ -42,23 +55,57 @@ void enableRawMode() {
 
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) die("tcgetattr");
 }
+
+/* Reads a key from the keyboard */
+char editorReadKey() {
+    int nread;
+    char c;
+    while ((nread = read(STDERR_FILENO, &c, 1)) != 1){
+        if (nread == -1 && errno != EAGAIN) die("read");   
+    }
+    return c;
+}
+
+void editorDrawRows() {
+    int y;
+    for (y = 0; y < 24; y++){
+        write(STDOUT_FILENO, "~\r\n", 3);
+    }
+}
+
+void editorRefreshScreen(){
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    write(STDOUT_FILENO, "\x1b[H", 3);
+
+    editorDrawRows();
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
 /* ---------------------------------*/
 
-/* init */
+/* Input */
+
+/* Processes the keypress given from editorReadKey */
+void editorProcessKeypress() {
+    char c = editorReadKey();
+
+    switch (c) {
+        case CTRL_KEY('q'):
+            write(STDOUT_FILENO, "\x1b[2J", 4);
+            write(STDOUT_FILENO, "\x1b[H", 3);
+            exit(0);
+            break;
+    }
+}
+/* ---------------------------------*/
+
+/* Init */
 
 /* Loops and recieves input, printing the input to the terminal */
 int main() {
     enableRawMode();
-
-    while (1) {
-        char c = '\0';
-        if (read(STDIN_FILENO, &c, 1) == -1 && errno != EAGAIN) die("read");
-        if (iscntrl(c)) {
-            printf("%d\r\n", c);
-        } else {
-            printf("%d ('%c')\r\n", c, c);
-        }
-        if (c == 'q') break;
+    while(1){
+        editorRefreshScreen();
+        editorProcessKeypress();
     }
-    return 0;
 }
